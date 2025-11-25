@@ -13,7 +13,6 @@
  */
 
 #include "main.h"
-
 #include <fcntl.h>
 #include <limits.h>
 #include <math.h>
@@ -74,26 +73,20 @@ void train_neural_net() {
         exit(-1);
     }
 
-    #pragma acc enter data copyin(input[0:num_training_patterns])
-    printf("copyin(input)\n");
-    fflush(stdout);
-
-    for (int i = 0; i < num_training_patterns; i++) {
-        #pragma acc enter data copyin(input[i][0:num_neurons[0]])
-    }
+    #pragma acc enter data copyin(input[0:num_training_patterns][0:num_neurons[0]])
+    #pragma acc enter data copyin(desired_outputs[0:num_training_patterns][0:num_neurons[num_layers - 1]])
 
     int ranpat[num_training_patterns];
 
-    printf("Entrem gradient descent: cada epoch (%d) fa %d iteracions de les funcions de training.c\n", 
-        num_epochs, num_training_patterns);
-    fflush(stdout);
+    // printf("Entrem gradient descent: cada epoch (%d) fa %d iteracions de les funcions de training.c\n", num_epochs, num_training_patterns);
+    // fflush(stdout);
 
     // Gradient Descent 
     for (int it = 0; it < num_epochs; it++) {
         // Train patterns randomly
 
-        printf("Epoch %d de %d.\n", it, num_epochs);
-        fflush(stdout);
+        // printf("Epoch %d de %d.\n", it, num_epochs);
+        // fflush(stdout);
         for (int p = 0; p < num_training_patterns; p++)
             ranpat[p] = p;
 
@@ -126,11 +119,11 @@ void train_neural_net() {
 }
 
 //-----------TEST THE TRAINED NETWORK------------
-//-----------TEST THE TRAINED NETWORK------------
 void test_nn() {
     char** rSet;
 
     printf("\nTesting...\n");
+    fflush(stdout);
 
     if ((rSet = loadPatternSet(num_test_patterns, dataset_test_path, 0)) == NULL) {
         printf("Error!!\n");
@@ -138,22 +131,30 @@ void test_nn() {
     }
 
     for (int i = 0; i < num_test_patterns; i++) {
-        for (int j = 0; j < num_neurons[0]; j++)
+        for (int j = 0; j < num_neurons[0]; j++){
             lay[0].actv[j] = rSet[i][j];
+        }
+        #pragma acc update device(lay[0].actv[0:num_neurons[0]])
 
         forward_prop();
+
+        #pragma acc update host(lay[num_layers - 1].actv[0:num_neurons[num_layers - 1]])
 
         printRecognized(i, lay[num_layers - 1]);
     }
 
+
     printf("\nTotal encerts = %d\n", total);
-    
+    fflush(stdout);
+
     freeInput(num_test_patterns, rSet);
 }
 
 //-----------MAIN-----------//
 int main(int argc, char** argv) {
-    printf("main\n");
+    // printf("main\n");
+    // fflush(stdout);
+
     if (debug == 1)
         printf("argc = %d \n", argc);
     if (argc <= 1)
@@ -174,39 +175,27 @@ int main(int argc, char** argv) {
 
     // Copiem num_neurons
     // Copiem lay (array d'estructures de la xarxa)
+    #pragma acc enter data copyin(num_layers, alpha)
     #pragma acc enter data copyin(num_neurons[0:num_layers])
     #pragma acc enter data copyin(lay[0:num_layers])
-    printf("copyin(num_neurons[0:num_layers])\n");
-    fflush(stdout);
 
     for (int i = 0; i < num_layers; i++) {
-        printf("iteracio %d de %d\n", i+1, num_layers);
-        fflush(stdout);
-        #pragma acc enter data create(lay[i].actv[0:num_neurons[i]])
-        #pragma acc enter data create(lay[i].z[0:num_neurons[i]])
-        #pragma acc enter data create(lay[i].dz[0:num_neurons[i]])
+        // printf("iteracio %d de %d\n", i+1, num_layers);
+        // fflush(stdout);
+        #pragma acc enter data copyin(lay[i].actv[0:num_neurons[i]])
+        #pragma acc enter data copyin(lay[i].z[0:num_neurons[i]])
+        #pragma acc enter data copyin(lay[i].dz[0:num_neurons[i]])
         #pragma acc enter data copyin(lay[i].bias[0:num_neurons[i]])
-        #pragma acc enter data create(lay[i].dbias[0:num_neurons[i]])
-        #pragma acc enter data create(lay[i].dactv[0:num_neurons[i]])
+        #pragma acc enter data copyin(lay[i].dbias[0:num_neurons[i]])
+        #pragma acc enter data copyin(lay[i].dactv[0:num_neurons[i]])
         if (i < num_layers - 1) {
             #pragma acc enter data copyin(lay[i].out_weights[0:num_neurons[i]*num_neurons[i+1]])
-            #pragma acc enter data create(lay[i].dw[0:num_neurons[i]*num_neurons[i+1]])
+            #pragma acc enter data copyin(lay[i].dw[0:num_neurons[i]*num_neurons[i+1]])
         }
     }
 
-    printf("sortim dels enter data create/copyin\n");
-    fflush(stdout);
-
-    #pragma acc enter data copyin(input[0:num_training_patterns])
-    printf("copyin(input)\n");
-    fflush(stdout);
-
-    for (int i = 0; i < num_training_patterns; i++) {
-        #pragma acc enter data copyin(input[i][0:num_neurons[0]])
-    }
- 
-    printf("done\n");
-    fflush(stdout);
+    // printf("done\n");
+    // fflush(stdout);
 
     if (debug == 1)
         printf("COST MALLOC \n");
@@ -217,34 +206,11 @@ int main(int argc, char** argv) {
     struct timeval begin, end;
     gettimeofday(&begin, 0);
 
-    double sum_weights_before = 0.0;
-    for (int i = 0; i < num_layers-1; ++i) {
-        int n = num_neurons[i]*num_neurons[i+1];
-        for (int k = 0; k < n; ++k) sum_weights_before += lay[i].out_weights[k];
-    }
-    printf("Sum weights before training (host): %f\n", sum_weights_before);
-    fflush(stdout);
-
     // Train
     train_neural_net();
 
-    printf("Acabat train\n");
-    fflush(stdout);
-
-    for (int i = 0; i < num_layers; i++) {
-        #pragma acc update host(lay[i].bias[0:num_neurons[i]])
-        if (i < num_layers - 1) {
-            #pragma acc update host(lay[i].out_weights[0:num_neurons[i]*num_neurons[i+1]])
-        }
-    }
-
-    double sum_weights_after = 0.0;
-    for (int i = 0; i < num_layers-1; ++i) {
-        int n = num_neurons[i]*num_neurons[i+1];
-        for (int k = 0; k < n; ++k) sum_weights_after += lay[i].out_weights[k];
-    }
-    printf("Sum weights after training (host): %f\n", sum_weights_after);
-    fflush(stdout);
+    // printf("Acabat train\n");
+    // fflush(stdout);
 
     // Test
     test_nn();

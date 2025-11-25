@@ -50,4 +50,3 @@ void train_neural_net();
 void test_nn();
 
 #endif
-
