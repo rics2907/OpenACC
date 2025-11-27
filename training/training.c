@@ -50,27 +50,24 @@ void feed_input(int i) {
 void forward_prop() {
     #pragma acc data present(lay, num_neurons)
     {   
-        #pragma acc parallel 
-        {
-            for (int i = 1; i < num_layers; i++) {
-                #pragma acc loop 
-                for (int j = 0; j < num_neurons[i]; j++) {
-                    lay[i].z[j] = lay[i].bias[j];
-                    for (int k = 0; k < num_neurons[i - 1]; k++)
-                        lay[i].z[j] +=
-                            ((lay[i - 1].out_weights[j * num_neurons[i - 1] + k]) *
-                            (lay[i - 1].actv[k]));
-
-                    if (i < num_layers - 1)  // Relu Activation Function for Hidden Layers
-                        lay[i].actv[j] = ((lay[i].z[j]) < 0) ? 0 : lay[i].z[j];
-                    else  // Sigmoid Activation Function for Output Layer
-                        lay[i].actv[j] = 1 / (1 + exp(-lay[i].z[j]));
+        for (int i = 1; i < num_layers; i++) {
+            #pragma acc parallel loop present(lay, num_neurons) async(1)
+            for (int j = 0; j < num_neurons[i]; j++) {
+                float sum = lay[i].bias[j];
+                #pragma acc loop reduction(+:sum)
+                for (int k = 0; k < num_neurons[i - 1]; k++) {
+                    sum += lay[i - 1].out_weights[j * num_neurons[i - 1] + k] * lay[i - 1].actv[k];
                 }
+                lay[i].z[j] = sum;
+
+                if (i < num_layers - 1)  // ReLU Activation Function for Hidden Layers
+                    lay[i].actv[j] = (sum < 0) ? 0 : sum;
+                else  // Sigmoid Activation Function for Output Layer
+                    lay[i].actv[j] = 1 / (1 + exp(-sum));
             }
         }
     }
 }
-
 
 /**
  * @brief Calcula el gradient que es necessari aplicar als pesos de les
